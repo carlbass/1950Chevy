@@ -44,13 +44,16 @@ void setup() {
     unsigned char len = 0;
     int           can_ID = 0x00;
 
-
     // get CAN bus communication starts
     while (CAN_OK != CAN.begin(CAN_500KBPS))           // set CANbus baudrate to 500kbps
     {
         delay(50);
     }    
     
+
+    //buf[0] = 15;
+    //CAN.sendMsgBuf (0x501, 0, 0, 1, buf); 
+
     // turn on speedbox so we can see request for data 0x7E0; ; timing requires arduino up and running; otherwise speedbox times out after sending 0x7E0
     pinMode(SPEEDBOX_PIN, OUTPUT); 
     digitalWrite (SPEEDBOX_PIN, HIGH);
@@ -58,7 +61,7 @@ void setup() {
     int start_millis = millis();
 
     // start speedbox and wait for response and then set speedometer to 0 by sending appropriate CAN bus message; timeout after 5 seconds
-    while ((millis() - start_millis < 5000) ) 
+    while ((millis() - start_millis < 5000)) 
     {       
       if (CAN_MSGAVAIL == CAN.checkReceive())
       {
@@ -73,11 +76,14 @@ void setup() {
           buf[3] = 0;
           
           CAN.sendMsgBuf (0x7E8, 0, 0, 4, buf);  //  id assigned for OBD-II response
-          ++i;
+          break;
         }
         delay (25);
       }
     }
+
+    //buf[0] = 255;
+    //CAN.sendMsgBuf (0x502, 0, 0, 1, buf); 
 
     // set up pin to write PWM signal to drive 3 gauges; the "fuel" gauge gets its info directly from the BMS
     pinMode(MOTOR_TEMPERATURE_PIN, OUTPUT);
@@ -91,7 +97,7 @@ void setup() {
       analogWrite(CONTROLLER_TEMPERATURE_PIN, i);       // when power is turned on, gauge should move all the way clockwise
       analogWrite(MOTOR_AMPERAGE_PIN, i);               // when power is turned on, gauge should move all the way 
       // also let speedometer climb          
-      buf[3] = i / 2.0;
+      buf[3] = i / 3.5;
       CAN.sendMsgBuf (0x7E8, 0, 0, 4, buf);  //  id assigned for OBD-II response
       delay (20);
     }
@@ -102,10 +108,11 @@ void setup() {
       analogWrite(CONTROLLER_TEMPERATURE_PIN, i);       
       analogWrite(MOTOR_AMPERAGE_PIN, i);               
       // also let speedometer slowly go back to 0          
-      buf[3] = i / 2.0;
+      buf[3] = i / 3.5;
       CAN.sendMsgBuf (0x7E8, 0, 0, 4, buf);  //  id assigned for OBD-II response
       delay (20);
     }
+
 }
 
 void drive_electric_gauges()
@@ -118,12 +125,14 @@ void drive_electric_gauges()
     PWM_out_level = map (max_motor_temperature, MIN_MOTOR_TEMPERATURE, MAX_MOTOR_TEMPERATURE, 0, 255);
     PWM_out_level = constrain(PWM_out_level, 0, 255);
     analogWrite(MOTOR_TEMPERATURE_PIN, PWM_out_level);
-    
+    buf[0] = PWM_out_level;
+
     // output maximum contoller temperature
     PWM_out_level = map (max_controller_temperature, MIN_CONTROLLER_TEMPERATURE, MAX_CONTROLLER_TEMPERATURE, 0, 255);
     PWM_out_level = constrain(PWM_out_level, 0, 255);
     PWM_out_level = 255 - PWM_out_level;    
     analogWrite(CONTROLLER_TEMPERATURE_PIN, PWM_out_level);
+    buf[1] = PWM_out_level;
 
     // output maximum motor current
     motor_1_amperage = constrain (motor_1_amperage, MIN_MOTOR_AMPERAGE, MAX_MOTOR_AMPERAGE/2.0);
@@ -135,13 +144,17 @@ void drive_electric_gauges()
     PWM_out_level = constrain(PWM_out_level, 0, 255);
     PWM_out_level = 255 - PWM_out_level;
     analogWrite(MOTOR_AMPERAGE_PIN, PWM_out_level);
+
+    buf[2] = PWM_out_level;
+    CAN.sendMsgBuf (0x500, 0, 0, 3, buf);  //  id assigned for OBD-II response
+
 }
 
 
 /*
  * process CAN bus messages from controllers with following format
  * for 0x400 and 0x401
- * byte 0 + byte 1 = motor amperage
+ * byte 0 + byte 1 = dc bus amperage
  * byte 3 + byte 4 = vehicle speed kmph
  * byte 5 + byte 6 = low word for odometer
  * byte 7 + byte 8 = high word for odometer
@@ -192,11 +205,12 @@ void loop() {
           controller_1_temperature = buf[0];
           motor_1_temperature = buf[1];
 
-          // offset by 40 and convert temperature from Celsius to Fahrenheit
-          controller_1_temperature += 40;        
+          // map [0, 255] to [-40, 215] degrees Celsius
+          controller_1_temperature -= 40;        
+          // convert to Fahrenheit 
           controller_1_temperature = (int) (((float) (controller_1_temperature) * 1.8)) + 32;
 
-          motor_1_temperature += 40;        
+          motor_1_temperature -= 40;        
           motor_1_temperature = (int) (((float) (motor_1_temperature) * 1.8)) + 32;
             
           drive_electric_gauges();
@@ -208,10 +222,10 @@ void loop() {
           motor_2_temperature = buf[1];
 
           // offset by 40 and convert temperature from Celsius to Fahrenheit
-          controller_2_temperature += 40;        
+          controller_2_temperature -= 40;        
           controller_2_temperature = (int) (((float) (controller_2_temperature) * 1.8)) + 32;
 
-          motor_2_temperature += 40;        
+          motor_2_temperature -= 40;        
           motor_2_temperature = (int) (((float) (motor_2_temperature) * 1.8)) + 32;
 
             
